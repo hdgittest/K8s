@@ -19,13 +19,14 @@ package cache
 import (
 	"context"
 	"errors"
-	clientgofeaturegate "k8s.io/client-go/features"
 	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/naming"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	clientgofeaturegate "k8s.io/client-go/features"
 	"k8s.io/utils/clock"
 )
 
@@ -602,6 +603,10 @@ func newInformer(clientState Store, options InformerOptions) Controller {
 			KnownObjects:          clientState,
 			EmitDeltaTypeReplaced: true,
 			Transformer:           options.Transform,
+			Metrics: newInformerMetrics(InformerIdentifier{
+				Name: makeValidPrometheusLabelValue(naming.GetNameFromCallsite(internalPackages...)),
+				Type: makeValidPrometheusLabelValue(getObjectTypeName(options.ObjectType)),
+			}),
 		})
 	}
 
