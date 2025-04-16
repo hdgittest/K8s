@@ -42,6 +42,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"k8s.io/apimachinery/pkg/api/apitesting"
 	"k8s.io/apimachinery/pkg/api/apitesting/fuzzer"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -695,22 +696,12 @@ func (storage *SimpleTypedStorage) GetSingularName() string {
 	return "simple"
 }
 
-func bodyOrDie(response *http.Response) string {
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		panic(err)
-	}
-	return string(body)
-}
-
 func extractBody(response *http.Response, object runtime.Object) (string, error) {
 	return extractBodyDecoder(response, object, codec)
 }
 
 func extractBodyDecoder(response *http.Response, object runtime.Object, decoder runtime.Decoder) (string, error) {
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
+	body, err := apitesting.ReadAllAndCloseResponseBody(response.Body)
 	if err != nil {
 		return string(body), err
 	}
@@ -718,8 +709,7 @@ func extractBodyDecoder(response *http.Response, object runtime.Object, decoder 
 }
 
 func extractBodyObject(response *http.Response, decoder runtime.Decoder) (runtime.Object, string, error) {
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
+	body, err := apitesting.ReadAllAndCloseResponseBody(response.Body)
 	if err != nil {
 		return nil, string(body), err
 	}
@@ -873,8 +863,7 @@ func TestUnimplementedRESTStorage(t *testing.T) {
 
 			response, err := client.Do(request)
 			require.NoError(t, err)
-			defer response.Body.Close()
-			_, err = io.ReadAll(response.Body)
+			err = apitesting.DrainAndCloseResponseBody(response.Body)
 			require.NoError(t, err)
 			require.Equal(t, v.ErrCode, response.StatusCode)
 		})
@@ -935,8 +924,7 @@ func TestSomeUnimplementedRESTStorage(t *testing.T) {
 
 			response, err := client.Do(request)
 			require.NoError(t, err)
-			defer response.Body.Close()
-			_, err = io.ReadAll(response.Body)
+			err = apitesting.DrainAndCloseResponseBody(response.Body)
 			require.NoError(t, err)
 			require.Equal(t, v.ErrCode, response.StatusCode)
 		})
@@ -1092,14 +1080,16 @@ func TestList(t *testing.T) {
 
 			resp, err := http.Get(server.URL + testCase.url)
 			require.NoError(t, err)
-			defer resp.Body.Close()
+			defer apitesting.AssertResponseBodyClosed(t, resp.Body)
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("unexpected status: %d from url %s, Expected: %d, %#v", resp.StatusCode, testCase.url, http.StatusOK, resp)
-				body, err := io.ReadAll(resp.Body)
+				body, err := apitesting.ReadAllAndCloseResponseBody(resp.Body)
 				require.NoError(t, err)
 				t.Logf("body: %s", string(body))
 				return
 			}
+			err = apitesting.DrainAndCloseResponseBody(resp.Body)
+			require.NoError(t, err)
 			if !simpleStorage.namespacePresent {
 				t.Error("namespace not set")
 			} else if simpleStorage.actualNamespace != testCase.namespace {
@@ -1143,13 +1133,14 @@ func TestRequestsWithInvalidQuery(t *testing.T) {
 			require.NoError(t, err)
 			resp, err := http.DefaultClient.Do(r)
 			require.NoError(t, err)
-			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Errorf("unexpected status: %d from url %s, Expected: %d, %#v", resp.StatusCode, url, http.StatusBadRequest, resp)
-				body, err := io.ReadAll(resp.Body)
+				body, err := apitesting.ReadAllAndCloseResponseBody(resp.Body)
 				require.NoError(t, err)
 				t.Logf("body: %s", string(body))
 			}
+			err = apitesting.DrainAndCloseResponseBody(resp.Body)
+			require.NoError(t, err)
 		})
 	}
 }
@@ -1201,10 +1192,10 @@ func TestListCompression(t *testing.T) {
 			req.Header.Set("Accept-Encoding", testCase.acceptEncoding)
 			resp, err := http.DefaultClient.Do(req)
 			require.NoError(t, err)
-			defer resp.Body.Close()
+			defer apitesting.AssertResponseBodyClosed(t, resp.Body)
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("unexpected status: %d from url %s, Expected: %d, %#v", resp.StatusCode, testCase.url, http.StatusOK, resp)
-				body, err := io.ReadAll(resp.Body)
+				body, err := apitesting.ReadAllAndCloseResponseBody(resp.Body)
 				require.NoError(t, err)
 				t.Logf("body: %s", string(body))
 				return
@@ -1232,6 +1223,7 @@ func TestListCompression(t *testing.T) {
 			var itemOut genericapitesting.SimpleList
 			err = decoder.Decode(&itemOut)
 			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
 		})
 	}
 }
@@ -1893,7 +1885,7 @@ func TestWatchTable(t *testing.T) {
 			req.Header.Set("Accept", test.accept)
 			resp, err := http.DefaultClient.Do(req)
 			require.NoError(t, err)
-			defer resp.Body.Close()
+			defer apitesting.AssertResponseBodyClosed(t, resp.Body)
 			if test.statusCode != 0 {
 				assert.Equal(t, test.statusCode, resp.StatusCode)
 				obj, _, err := extractBodyObject(resp, unstructured.UnstructuredJSONScheme)
@@ -1919,10 +1911,10 @@ func TestWatchTable(t *testing.T) {
 				test.send(watcher)
 			}()
 
-			body, err := io.ReadAll(resp.Body)
+			body, err := apitesting.ReadAllAndCloseResponseBody(resp.Body)
 			require.NoError(t, err)
 			t.Logf("Body:\n%s", string(body))
-			d := newDecoder(resp.Header.Get("Content-Type"), ioutil.NopCloser(bytes.NewReader(body)))
+			d := newDecoder(resp.Header.Get("Content-Type"), io.NopCloser(bytes.NewReader(body)))
 			var actual []*metav1.WatchEvent
 			for {
 				var event metav1.WatchEvent
@@ -2363,8 +2355,8 @@ func TestConnect(t *testing.T) {
 	resp, err := http.Get(server.URL + "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/namespaces/default/simple/" + itemID + "/connect")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	defer apitesting.AssertResponseBodyClosed(t, resp.Body)
+	body, err := apitesting.ReadAllAndCloseResponseBody(resp.Body)
 	require.NoError(t, err)
 	if connectStorage.receivedID != itemID {
 		t.Errorf("Unexpected item id. Expected: %s. Actual: %s.", itemID, connectStorage.receivedID)
@@ -2394,8 +2386,8 @@ func TestConnectResponderObject(t *testing.T) {
 	resp, err := http.Get(server.URL + "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/namespaces/default/simple/" + itemID + "/connect")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	defer apitesting.AssertResponseBodyClosed(t, resp.Body)
+	body, err := apitesting.ReadAllAndCloseResponseBody(resp.Body)
 	require.NoError(t, err)
 	if connectStorage.receivedID != itemID {
 		t.Errorf("Unexpected item id. Expected: %s. Actual: %s.", itemID, connectStorage.receivedID)
@@ -2426,8 +2418,8 @@ func TestConnectResponderError(t *testing.T) {
 	resp, err := http.Get(server.URL + "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/namespaces/default/simple/" + itemID + "/connect")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	defer apitesting.AssertResponseBodyClosed(t, resp.Body)
+	body, err := apitesting.ReadAllAndCloseResponseBody(resp.Body)
 	require.NoError(t, err)
 	if connectStorage.receivedID != itemID {
 		t.Errorf("Unexpected item id. Expected: %s. Actual: %s.", itemID, connectStorage.receivedID)
@@ -2486,8 +2478,8 @@ func TestConnectWithOptions(t *testing.T) {
 	resp, err := http.Get(server.URL + "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/namespaces/default/simple/" + itemID + "/connect?param1=value1&param2=value2")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	defer apitesting.AssertResponseBodyClosed(t, resp.Body)
+	body, err := apitesting.ReadAllAndCloseResponseBody(resp.Body)
 	require.NoError(t, err)
 	if connectStorage.receivedID != itemID {
 		t.Errorf("Unexpected item id. Expected: %s. Actual: %s.", itemID, connectStorage.receivedID)
@@ -2529,8 +2521,7 @@ func TestConnectWithOptionsAndPath(t *testing.T) {
 	resp, err := http.Get(server.URL + "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/namespaces/default/simple/" + itemID + "/connect" + testPath + "?param1=value1&param2=value2")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := apitesting.ReadAllAndCloseResponseBody(resp.Body)
 	require.NoError(t, err)
 	if connectStorage.receivedID != itemID {
 		t.Errorf("Unexpected item id. Expected: %s. Actual: %s.", itemID, connectStorage.receivedID)
@@ -3981,13 +3972,12 @@ func BenchmarkUpdateProtobuf(b *testing.B) {
 		response, err := client.Do(request)
 		require.NoError(b, err)
 		if response.StatusCode != http.StatusBadRequest {
-			body, err := io.ReadAll(response.Body)
+			body, err := apitesting.ReadAllAndCloseResponseBody(response.Body)
 			require.NoError(b, err)
 			b.Fatalf("Unexpected response %#v\n%s", response, body)
 		}
-		_, err = io.ReadAll(response.Body)
+		err = apitesting.DrainAndCloseResponseBody(response.Body)
 		require.NoError(b, err)
-		response.Body.Close()
 	}
 	b.StopTimer()
 }

@@ -31,8 +31,10 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/websocket"
+	"k8s.io/apimachinery/pkg/api/apitesting"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -42,7 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer/streaming"
 	"k8s.io/apimachinery/pkg/watch"
 	example "k8s.io/apiserver/pkg/apis/example"
-	apitesting "k8s.io/apiserver/pkg/endpoints/testing"
+	endpointstesting "k8s.io/apiserver/pkg/endpoints/testing"
 	"k8s.io/apiserver/pkg/registry/rest"
 )
 
@@ -69,9 +71,9 @@ var watchTestTable = []struct {
 	t   watch.EventType
 	obj runtime.Object
 }{
-	{watch.Added, &apitesting.Simple{ObjectMeta: metav1.ObjectMeta{Name: "foo"}}},
-	{watch.Modified, &apitesting.Simple{ObjectMeta: metav1.ObjectMeta{Name: "bar"}}},
-	{watch.Deleted, &apitesting.Simple{ObjectMeta: metav1.ObjectMeta{Name: "bar"}}},
+	{watch.Added, &endpointstesting.Simple{ObjectMeta: metav1.ObjectMeta{Name: "foo"}}},
+	{watch.Modified, &endpointstesting.Simple{ObjectMeta: metav1.ObjectMeta{Name: "bar"}}},
+	{watch.Deleted, &endpointstesting.Simple{ObjectMeta: metav1.ObjectMeta{Name: "bar"}}},
 }
 
 func podWatchTestTable() []struct {
@@ -259,9 +261,7 @@ func TestWatchClientClose(t *testing.T) {
 	}
 
 	// Close response to cause a cancel on the server
-	if err := response.Body.Close(); err != nil {
-		t.Fatalf("Unexpected close client err: %v", err)
-	}
+	require.NoError(t, response.Body.Close())
 
 	select {
 	case data, ok := <-watcher.ResultChan():
@@ -553,7 +553,7 @@ func TestWatchParamParsing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v: unexpected error: %v", item.rawQuery, err)
 			}
-			resp.Body.Close()
+			require.NoError(t, resp.Body.Close())
 			if e, a := item.namespace, simpleStorage.requestedResourceNamespace; e != a {
 				t.Errorf("%v: expected %v, got %v", item.rawQuery, e, a)
 			}
@@ -684,10 +684,8 @@ func runWatchHTTPBenchmark(b *testing.B, items []runtime.Object, contentType str
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		defer response.Body.Close()
-		if _, err := io.Copy(ioutil.Discard, response.Body); err != nil {
-			b.Error(err)
-		}
+		err := apitesting.DrainAndCloseResponseBody(response.Body)
+		assert.NoError(b, err)
 		wg.Done()
 	}()
 
