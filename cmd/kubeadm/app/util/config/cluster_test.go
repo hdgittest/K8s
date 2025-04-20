@@ -328,7 +328,7 @@ func TestGetNodeRegistration(t *testing.T) {
 			client := clientsetfake.NewSimpleClientset()
 
 			if rt.node != nil {
-				_, err := client.CoreV1().Nodes().Create(context.TODO(), rt.node, metav1.CreateOptions{})
+				_, err := client.CoreV1().Nodes().Create(t.Context(), rt.node, metav1.CreateOptions{})
 				if err != nil {
 					t.Errorf("couldn't create Node")
 					return
@@ -336,7 +336,7 @@ func TestGetNodeRegistration(t *testing.T) {
 			}
 
 			cfg := &kubeadmapi.InitConfiguration{}
-			err = GetNodeRegistration(cfgPath, client, &cfg.NodeRegistration, &cfg.ClusterConfiguration)
+			err = GetNodeRegistration(t.Context(), cfgPath, client, &cfg.NodeRegistration, &cfg.ClusterConfiguration)
 			if rt.expectedError != (err != nil) {
 				t.Errorf("unexpected return err from getNodeRegistration: %v", err)
 				return
@@ -635,7 +635,7 @@ func TestGetInitConfigurationFromCluster(t *testing.T) {
 				}
 			}
 
-			cfg, err := getInitConfigurationFromCluster(tmpdir, client, rt.newControlPlane, false)
+			cfg, err := getInitConfigurationFromCluster(t.Context(), tmpdir, client, rt.newControlPlane, false)
 			if rt.expectedError != (err != nil) {
 				t.Errorf("unexpected return err from getInitConfigurationFromCluster: %v", err)
 				return

@@ -87,7 +87,7 @@ func NewKubeletWaitBootstrapPhase() workflow.Phase {
 		// https://github.com/kubernetes/enhancements/issues/4471
 		Hidden: true,
 		// Only run this phase as if `ControlPlaneKubeletLocalMode` is activated.
-		RunIf: func(c workflow.RunData) (bool, error) {
+		RunIf: func(_ context.Context, c workflow.RunData) (bool, error) {
 			return checkFeatureState(c, features.ControlPlaneKubeletLocalMode, true)
 		},
 	}
@@ -113,7 +113,7 @@ func getKubeletStartJoinData(c workflow.RunData) (*kubeadmapi.JoinConfiguration,
 // runKubeletStartJoinPhase executes the kubelet TLS bootstrap process.
 // This process is executed by the kubelet and completes with the node joining the cluster
 // with a dedicates set of credentials as required by the node authorizer
-func runKubeletStartJoinPhase(c workflow.RunData) (returnErr error) {
+func runKubeletStartJoinPhase(ctx context.Context, c workflow.RunData) (returnErr error) {
 	cfg, initCfg, tlsBootstrapCfg, err := getKubeletStartJoinData(c)
 	if err != nil {
 		return err
@@ -196,7 +196,7 @@ func runKubeletStartJoinPhase(c workflow.RunData) (returnErr error) {
 	// A new Node with the same name as an existing control-plane Node can cause undefined
 	// behavior and ultimately control-plane failure.
 	klog.V(1).Infof("[kubelet-start] Checking for an existing Node in the cluster with name %q and status %q", nodeName, v1.NodeReady)
-	node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return errors.Wrapf(err, "cannot get Node %q", nodeName)
 	}
@@ -255,7 +255,7 @@ func runKubeletStartJoinPhase(c workflow.RunData) (returnErr error) {
 
 	// Run the same code as KubeletWaitBootstrapPhase would do if the ControlPlaneKubeletLocalMode feature gate is disabled.
 	if !features.Enabled(initCfg.FeatureGates, features.ControlPlaneKubeletLocalMode) {
-		if err := runKubeletWaitBootstrapPhase(c); err != nil {
+		if err := runKubeletWaitBootstrapPhase(ctx, c); err != nil {
 			return err
 		}
 	}
@@ -266,7 +266,7 @@ func runKubeletStartJoinPhase(c workflow.RunData) (returnErr error) {
 // runKubeletWaitBootstrapPhase waits for the kubelet to finish its TLS bootstrap process.
 // This process is executed by the kubelet and completes with the node joining the cluster
 // with a dedicates set of credentials as required by the node authorizer.
-func runKubeletWaitBootstrapPhase(c workflow.RunData) (returnErr error) {
+func runKubeletWaitBootstrapPhase(_ context.Context, c workflow.RunData) (returnErr error) {
 	data, ok := c.(JoinData)
 	if !ok {
 		return errors.New("kubelet-start phase invoked with an invalid data struct")
