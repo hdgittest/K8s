@@ -1441,7 +1441,8 @@ func doPodResizeErrorTests() {
 //       Above tests are performed by doSheduletTests() and doPodResizeResourceQuotaTests()
 //       in test/e2e/node/pod_resize.go
 
-var _ = SIGDescribe("Pod InPlace Resize Container", framework.WithFeatureGate(features.InPlacePodVerticalScaling), func() {
+// Only run serial because of issues with namespace controller
+var _ = SIGDescribe("Pod InPlace Resize Container", framework.WithFeatureGate(features.InPlacePodVerticalScaling), framework.WithSerial(), func() {
 	f := framework.NewDefaultFramework("pod-resize-tests")
 
 	ginkgo.BeforeEach(func(ctx context.Context) {
