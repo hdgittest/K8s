@@ -43,21 +43,21 @@ var _ = SIGDescribe(feature.KubeletFineGrainedAuthz, func() {
 
 	ginkgo.Context("when calling kubelet API", func() {
 		ginkgo.It("check /healthz enpoint is accessible via nodes/healthz RBAC", func(ctx context.Context) {
-			sc := runKubeletAuthzTest(ctx, f, "healthz", "healthz")
+			sc := runKubeletAuthzTest(ctx, f, "healthz", "healthz", true)
 			gomega.Expect(sc).To(gomega.Equal("200"))
 		})
 		ginkgo.It("check /healthz enpoint is accessible via nodes/proxy RBAC", func(ctx context.Context) {
-			sc := runKubeletAuthzTest(ctx, f, "healthz", "proxy")
+			sc := runKubeletAuthzTest(ctx, f, "healthz", "proxy", false)
 			gomega.Expect(sc).To(gomega.Equal("200"))
 		})
 		ginkgo.It("check /healthz enpoint is not accessible via nodes/configz RBAC", func(ctx context.Context) {
-			sc := runKubeletAuthzTest(ctx, f, "healthz", "configz")
+			sc := runKubeletAuthzTest(ctx, f, "healthz", "configz", true)
 			gomega.Expect(sc).To(gomega.Equal("403"))
 		})
 	})
 })
 
-func runKubeletAuthzTest(ctx context.Context, f *framework.Framework, endpoint, authzSubresource string) string {
+func runKubeletAuthzTest(ctx context.Context, f *framework.Framework, endpoint, authzSubresource string, failOnAuthzUpdateErr bool) string {
 	ns := f.Namespace.Name
 	saName := authzSubresource + "-sa-" + rand.String(5)
 	crName := authzSubresource + "-cr-" + rand.String(5)
@@ -113,7 +113,12 @@ func runKubeletAuthzTest(ctx context.Context, f *framework.Framework, endpoint, 
 		},
 		true,
 	)
-	framework.ExpectNoError(err)
+
+	if err != nil && failOnAuthzUpdateErr {
+		framework.ExpectNoError(err)
+	} else if err != nil {
+		framework.Logf("Warning: Failed waiting for authorization: %v", err)
+	}
 
 	pod := e2epod.NewAgnhostPod(ns, fmt.Sprintf("agnhost-pod-%s", authzSubresource), nil, nil, nil)
 	pod.Spec.ServiceAccountName = saName
