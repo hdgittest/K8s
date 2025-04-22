@@ -110,12 +110,11 @@ func isIPTablesBased(mode proxyconfigapi.ProxyMode) bool {
 func (s *ProxyServer) platformCheckSupported(ctx context.Context) (ipv4Supported, ipv6Supported, dualStackSupported bool, err error) {
 	logger := klog.FromContext(ctx)
 
-	_, errIPv6 := os.Stat("/proc/net/if_inet6")
-
 	if isIPTablesBased(s.Config.Mode) {
+		// Check for the iptables and ip6tables binaries.
 		ipts := utiliptables.NewDualStack()
 		ipv4Supported = ipts[v1.IPv4Protocol] != nil
-		ipv6Supported = errIPv6 == nil && ipts[v1.IPv6Protocol] != nil
+		ipv6Supported = ipts[v1.IPv6Protocol] != nil
 
 		if !ipv4Supported && !ipv6Supported {
 			err = fmt.Errorf("iptables is not available on this host")
@@ -125,9 +124,16 @@ func (s *ProxyServer) platformCheckSupported(ctx context.Context) (ipv4Supported
 			logger.Info("No iptables support for family", "ipFamily", v1.IPv6Protocol)
 		}
 	} else {
-		// Assume support for both families.
-		ipv4Supported, ipv6Supported = true, errIPv6 == nil
+		// The nft CLI always supports both families.
+		ipv4Supported, ipv6Supported = true, true
 	}
+
+	// Check if the OS has IPv6 enabled, by verifying if the IPv6 interfaces are available
+	_, errIPv6 := os.Stat("/proc/net/if_inet6")
+	if errIPv6 != nil {
+		ipv6Supported = false
+	}
+	err = errors.Join(err, errIPv6)
 
 	// The Linux proxies can always support dual-stack if they can support both IPv4
 	// and IPv6.
