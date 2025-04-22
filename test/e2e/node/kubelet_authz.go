@@ -26,6 +26,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	"k8s.io/kubernetes/pkg/cluster/ports"
 	"k8s.io/kubernetes/test/e2e/feature"
@@ -58,8 +59,8 @@ var _ = SIGDescribe(feature.KubeletFineGrainedAuthz, func() {
 
 func runKubeletAuthzTest(ctx context.Context, f *framework.Framework, endpoint, authzSubresource string) string {
 	ns := f.Namespace.Name
-	saName := authzSubresource
-	crName := authzSubresource
+	saName := authzSubresource + "-sa-" + rand.String(5)
+	crName := authzSubresource + "-cr-" + rand.String(5)
 	verb := "get"
 	resource := "nodes"
 
