@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -108,6 +109,9 @@ type TestServerInstanceOptions struct {
 	BinaryVersion string
 	// Set non-default request timeout in the server.
 	RequestTimeout time.Duration
+	// Override the kube emulation and minCompatibility versions in DefaultComponentGlobalsRegistry.
+	// Only needed in testing of cel features.
+	OverrideDefaultKubeEffectiveVersion bool
 }
 
 // TestServer return values supplied by kube-test-ApiServer
@@ -144,6 +148,8 @@ func NewDefaultTestServerOptions() *TestServerInstanceOptions {
 		EnableCertAuth: true,
 	}
 }
+
+var startTestServerLock sync.Mutex
 
 // StartTestServer starts a etcd server and kube-apiserver. A rest client config and a tear-down func,
 // and location of the tmpdir are returned.
@@ -379,6 +385,20 @@ func StartTestServer(t ktesting.TB, instanceOptions *TestServerInstanceOptions, 
 		}
 	}
 	utilfeature.DefaultMutableFeatureGate.AddMetrics()
+
+	if instanceOptions.OverrideDefaultKubeEffectiveVersion {
+		defaultKubeEffectiveVersion := compatibility.DefaultComponentGlobalsRegistry.EffectiveVersionFor(basecompatibility.DefaultKubeComponent).(basecompatibility.MutableEffectiveVersion)
+		startTestServerLock.Lock()
+		originalEmulationVersion := defaultKubeEffectiveVersion.EmulationVersion()
+		originalMinCompatibilityVersion := defaultKubeEffectiveVersion.MinCompatibilityVersion()
+		defaultKubeEffectiveVersion.SetEmulationVersion(effectiveVersion.EmulationVersion())
+		defaultKubeEffectiveVersion.SetMinCompatibilityVersion(effectiveVersion.MinCompatibilityVersion())
+		t.Cleanup(func() {
+			defaultKubeEffectiveVersion.SetEmulationVersion(originalEmulationVersion)
+			defaultKubeEffectiveVersion.SetMinCompatibilityVersion(originalMinCompatibilityVersion)
+			startTestServerLock.Unlock()
+		})
+	}
 
 	if instanceOptions.EnableCertAuth {
 		if featureGate.Enabled(features.UnknownVersionInteroperabilityProxy) {

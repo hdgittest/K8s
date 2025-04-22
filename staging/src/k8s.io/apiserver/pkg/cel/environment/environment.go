@@ -256,6 +256,9 @@ func (e *EnvSet) filterAndBuildOpts(base *cel.Env, compatVer *version.Version, h
 		}
 		if compatVer.AtLeast(opt.IntroducedVersion) && (opt.RemovedVersion == nil || compatVer.LessThan(opt.RemovedVersion)) {
 			allowedByVersion = true
+			fmt.Printf("sizhangDebug: allowedByVersion, compatVer = %s\n", compatVer.String())
+		} else {
+			fmt.Printf("sizhangDebug: not allowedByVersion, compatVer = %s\n", compatVer.String())
 		}
 
 		if allowedByFeatureGate || allowedByVersion {
