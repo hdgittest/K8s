@@ -24,6 +24,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"syscall"
@@ -55,8 +56,12 @@ import (
 )
 
 func TestAuthenticationValidate(t *testing.T) {
+	testDataDir := filepath.Join("testdata")
+
 	testCases := []struct {
 		name                              string
+		clientCert                        *apiserveroptions.ClientCertAuthenticationOptions
+		requestHeader                     *apiserveroptions.RequestHeaderAuthenticationOptions
 		testAnonymous                     *AnonymousAuthenticationOptions
 		testOIDC                          *OIDCAuthenticationOptions
 		testSA                            *ServiceAccountAuthenticationOptions
@@ -251,11 +256,43 @@ func TestAuthenticationValidate(t *testing.T) {
 				FlagsSet: true,
 			},
 		},
+		{
+			name:       "overlapping CA without allowed-names",
+			clientCert: &apiserveroptions.ClientCertAuthenticationOptions{ClientCA: filepath.Join(testDataDir, "client-ca.pem")},
+			requestHeader: &apiserveroptions.RequestHeaderAuthenticationOptions{
+				ClientCAFile:    filepath.Join(testDataDir, "client-ca.pem"),
+				AllowedNames:    []string{},
+				UsernameHeaders: []string{"X-Remote-User"},
+			},
+			expectErr: "when 'requestheader-client-ca-file' and 'client-ca-file' are the same, 'requestheader-allowed-names' must be specified",
+		},
+		{
+			name:       "overlapping CA with allowed-names",
+			clientCert: &apiserveroptions.ClientCertAuthenticationOptions{ClientCA: filepath.Join(testDataDir, "client-ca.pem")},
+			requestHeader: &apiserveroptions.RequestHeaderAuthenticationOptions{
+				ClientCAFile:    filepath.Join(testDataDir, "client-ca.pem"),
+				AllowedNames:    []string{"Client-CA"},
+				UsernameHeaders: []string{"X-Remote-User"},
+			},
+			expectErr: "",
+		},
+		{
+			name:       "different CAs without allowed-names",
+			clientCert: &apiserveroptions.ClientCertAuthenticationOptions{ClientCA: filepath.Join(testDataDir, "client-ca.pem")},
+			requestHeader: &apiserveroptions.RequestHeaderAuthenticationOptions{
+				ClientCAFile:    filepath.Join(testDataDir, "server-ca.pem"),
+				AllowedNames:    []string{},
+				UsernameHeaders: []string{"X-Remote-User"},
+			},
+			expectErr: "",
+		},
 	}
 
 	for _, testcase := range testCases {
 		t.Run(testcase.name, func(t *testing.T) {
 			options := NewBuiltInAuthenticationOptions()
+			options.ClientCert = testcase.clientCert
+			options.RequestHeader = testcase.requestHeader
 			options.Anonymous = testcase.testAnonymous
 			options.OIDC = testcase.testOIDC
 			options.ServiceAccounts = testcase.testSA
