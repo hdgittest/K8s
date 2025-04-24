@@ -19,9 +19,10 @@ package runtime
 import (
 	"context"
 	"fmt"
+	pointer "k8s.io/utils/ptr"
 	"net/http"
 	"runtime"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -150,13 +151,14 @@ func logPanic(ctx context.Context, r interface{}) {
 var ErrorHandlers = []ErrorHandler{
 	logError,
 	func(_ context.Context, _ error, _ string, _ ...interface{}) {
-		(&rudimentaryErrorBackoff{
-			lastErrorTime: time.Now(),
+		backoff := &rudimentaryErrorBackoff{
 			// 1ms was the number folks were able to stomach as a global rate limit.
 			// If you need to log errors more than 1000 times a second you
 			// should probably consider fixing your code instead. :)
 			minPeriod: time.Millisecond,
-		}).OnError()
+		}
+		backoff.lastErrorTime.Store(pointer.To(time.Now()))
+		backoff.OnError()
 	},
 }
 
@@ -230,21 +232,22 @@ type rudimentaryErrorBackoff struct {
 	minPeriod time.Duration // immutable
 	// TODO(lavalamp): use the clock for testability. Need to move that
 	// package for that to be accessible here.
-	lastErrorTimeLock sync.Mutex
-	lastErrorTime     time.Time
+	lastErrorTime atomic.Pointer[time.Time]
 }
 
 // OnError will block if it is called more often than the embedded period time.
 // This will prevent overly tight hot error loops.
 func (r *rudimentaryErrorBackoff) OnError() {
-	now := time.Now() // start the timer before acquiring the lock
-	r.lastErrorTimeLock.Lock()
-	d := now.Sub(r.lastErrorTime)
-	r.lastErrorTime = time.Now()
-	r.lastErrorTimeLock.Unlock()
+	now := time.Now() // start the timer before atomic operations
+	var t time.Time
+	if loaded := r.lastErrorTime.Load(); loaded != nil {
+		t = *loaded
+	} else {
+		panic("rudimentaryErrorBackoff.lastErrorTime was not initialized")
+	}
+	d := now.Sub(t)
+	r.lastErrorTime.Store(&now)
 
-	// Do not sleep with the lock held because that causes all callers of HandleError to block.
-	// We only want the current goroutine to block.
 	// A negative or zero duration causes time.Sleep to return immediately.
 	// If the time moves backwards for any reason, do nothing.
 	time.Sleep(r.minPeriod - d)

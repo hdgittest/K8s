@@ -243,6 +243,7 @@ func Test_rudimentaryErrorBackoff_OnError_ParallelSleep(t *testing.T) {
 	r := &rudimentaryErrorBackoff{
 		minPeriod: time.Second,
 	}
+	r.lastErrorTime.Store(&time.Time{})
 
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -260,6 +261,36 @@ func Test_rudimentaryErrorBackoff_OnError_ParallelSleep(t *testing.T) {
 
 	if since := time.Since(st); since > 5*time.Second {
 		t.Errorf("OnError slept for too long: %s", since)
+	}
+}
+
+func BenchmarkRudimentaryErrorBackoff_OnError(b *testing.B) {
+	r := &rudimentaryErrorBackoff{
+		minPeriod: time.Nanosecond,
+	}
+	now := time.Now()
+	r.lastErrorTime.Store(&now)
+	b.ResetTimer()
+
+	for _, numGoroutines := range []int{1, 10, 100, 1000} {
+		b.Run(fmt.Sprintf("Goroutines-%d", numGoroutines), func(b *testing.B) {
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				var wg sync.WaitGroup
+				wg.Add(numGoroutines)
+				start := make(chan struct{})
+				for j := 0; j < numGoroutines; j++ {
+					go func() {
+						defer wg.Done()
+						<-start
+						r.OnError()
+					}()
+				}
+				close(start)
+				wg.Wait()
+			}
+		})
 	}
 }
 
