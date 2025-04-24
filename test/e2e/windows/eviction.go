@@ -131,7 +131,10 @@ var _ = sigDescribe(feature.Windows, "Eviction", framework.WithSerial(), framewo
 				NodeName: node.Name,
 			},
 		}
-		_, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod1, metav1.CreateOptions{})
+		pod1, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod1, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		err = e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod1)
 		framework.ExpectNoError(err)
 
 		ginkgo.By("Scheduling another pod will consume the rest of the node's memory")
@@ -165,15 +168,15 @@ var _ = sigDescribe(feature.Windows, "Eviction", framework.WithSerial(), framewo
 				NodeName: node.Name,
 			},
 		}
-		_, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod2, metav1.CreateOptions{})
+		pod2, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod2, metav1.CreateOptions{})
 		framework.ExpectNoError(err)
 
 		if ginkgo.CurrentSpecReport().Failed() {
 			logNodeMemoryDebugInfo(ctx, f, node.Name, f.Namespace.Name, "pod2")
 		}
 
-		ginkgo.By("Waiting for pods to start running")
-		err = e2epod.WaitForPodsRunningReady(ctx, f.ClientSet, f.Namespace.Name, 2, 3*time.Minute)
+		ginkgo.By("Waiting for pod2 to start running")
+		err = e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod2)
 		framework.ExpectNoError(err)
 
 		framework.Logf("Waiting for pod2 to get evicted")
@@ -197,23 +200,21 @@ var _ = sigDescribe(feature.Windows, "Eviction", framework.WithSerial(), framewo
 
 			eventList, err := f.ClientSet.CoreV1().Events(f.Namespace.Name).List(ctx, metav1.ListOptions{})
 			framework.ExpectNoError(err)
+			evictEventFound := false
 			for _, e := range eventList.Items {
-				// Look for an event that shows FailedScheduling
-				if e.Type == "Warning" && e.Reason == "Evicted" && strings.Contains(e.Message, "pod2") {
-					framework.Logf("Found %+v event with message %+v", e.Reason, e.Message)
-					return true
-				}
-
-				if e.Reason == "Evicted" {
+				if e.InvolvedObject.Name == pod2.Name {
+					framework.Logf("Event for pod2: Type=%s, Reason=%s, Message=%q", e.Type, e.Reason, e.Message)
+				} else if e.Reason == "Evicted" {
 					framework.Logf("Found Evicted event for pod %s: Type=%s, Message=%q", e.InvolvedObject.Name, e.Type, e.Message)
 				}
 
-				// log pod2 events
-				if e.InvolvedObject.Name == pod2.Name {
-					framework.Logf("Event for pod2: Type=%s, Reason=%s, Message=%q", e.Type, e.Reason, e.Message)
+				// Look for an event that shows FailedScheduling
+				if e.Type == "Warning" && e.Reason == "Evicted" && strings.Contains(e.Message, "pod2") {
+					framework.Logf("Found %+v event with message %+v", e.Reason, e.Message)
+					evictEventFound = true
 				}
 			}
-			return false
+			return evictEventFound
 		}).WithTimeout(10 * time.Minute).WithPolling(10 * time.Second).Should(gomega.BeTrueBecause("Eviction Event was not found"))
 
 		ginkgo.By("Waiting for node.kubernetes.io/memory-pressure taint to be removed")

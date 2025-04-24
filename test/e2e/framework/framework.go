@@ -352,6 +352,7 @@ func (f *Framework) AfterEach(ctx context.Context) {
 	// expectation failures preventing deleting the namespace.
 	defer func() {
 		nsDeletionErrors := map[string]error{}
+		var nsDeleted []string
 		// Whether to delete namespace is determined by 3 factors: delete-namespace flag, delete-namespace-on-failure flag and the test result
 		// if delete-namespace set to false, namespace will always be preserved.
 		// if delete-namespace is true and delete-namespace-on-failure is false, namespace will be preserved if test failed.
@@ -369,6 +370,17 @@ func (f *Framework) AfterEach(ctx context.Context) {
 					} else {
 						Logf("Namespace %v was already deleted", ns.Name)
 					}
+				} else {
+					nsDeleted = append(nsDeleted, ns.Name)
+				}
+			}
+
+			if len(nsDeleted) > 0 {
+				err := WaitForNamespacesDeleted(ctx, f.ClientSet, nsDeleted, DefaultNamespaceDeletionTimeout)
+				if err != nil {
+					Logf("error waiting for namespaces %v to be deleted: %v", nsDeleted, err)
+				} else {
+					Logf("Namespaces %v deleted", nsDeleted)
 				}
 			}
 		} else {
