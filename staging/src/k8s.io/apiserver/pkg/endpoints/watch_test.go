@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/net/websocket"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,7 +96,8 @@ func TestWatchWebsocket(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	dest, _ := url.Parse(server.URL)
+	dest, err := url.Parse(server.URL)
+	require.NoError(t, err)
 	dest.Scheme = "ws" // Required by websocket, though the server never sees it.
 	dest.Path = "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/watch/simples"
 	dest.RawQuery = ""
@@ -105,9 +107,15 @@ func TestWatchWebsocket(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	var watcher *watch.FakeWatcher
+	for watcher == nil {
+		watcher = simpleStorage.Watcher()
+		time.Sleep(time.Millisecond)
+	}
+
 	try := func(action watch.EventType, object runtime.Object) {
 		// Send
-		simpleStorage.fakeWatch.Action(action, object)
+		watcher.Action(action, object)
 		// Test receive
 		var got watchJSON
 		err := websocket.JSON.Receive(ws, &got)
@@ -129,7 +137,7 @@ func TestWatchWebsocket(t *testing.T) {
 	for _, item := range watchTestTable {
 		try(item.t, item.obj)
 	}
-	simpleStorage.fakeWatch.Stop()
+	watcher.Stop()
 
 	var got watchJSON
 	err = websocket.JSON.Receive(ws, &got)
@@ -145,7 +153,8 @@ func TestWatchWebsocketClientClose(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	dest, _ := url.Parse(server.URL)
+	dest, err := url.Parse(server.URL)
+	require.NoError(t, err)
 	dest.Scheme = "ws" // Required by websocket, though the server never sees it.
 	dest.Path = "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/watch/simples"
 	dest.RawQuery = ""
@@ -155,9 +164,15 @@ func TestWatchWebsocketClientClose(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	var watcher *watch.FakeWatcher
+	for watcher == nil {
+		watcher = simpleStorage.Watcher()
+		time.Sleep(time.Millisecond)
+	}
+
 	try := func(action watch.EventType, object runtime.Object) {
 		// Send
-		simpleStorage.fakeWatch.Action(action, object)
+		watcher.Action(action, object)
 		// Test receive
 		var got watchJSON
 		err := websocket.JSON.Receive(ws, &got)
@@ -193,7 +208,7 @@ func TestWatchWebsocketClientClose(t *testing.T) {
 	ws.Close()
 
 	select {
-	case data, ok := <-simpleStorage.fakeWatch.ResultChan():
+	case data, ok := <-watcher.ResultChan():
 		if ok {
 			t.Errorf("expected a closed result channel, but got watch result %#v", data)
 		}
@@ -215,7 +230,8 @@ func TestWatchClientClose(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	dest, _ := url.Parse(server.URL)
+	dest, err := url.Parse(server.URL)
+	require.NoError(t, err)
 	dest.Path = "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/simples"
 	dest.RawQuery = "watch=1"
 
@@ -231,8 +247,15 @@ func TestWatchClientClose(t *testing.T) {
 	}
 
 	if response.StatusCode != http.StatusOK {
-		b, _ := ioutil.ReadAll(response.Body)
+		b, err := io.ReadAll(response.Body)
+		require.NoError(t, err)
 		t.Fatalf("Unexpected response: %#v\n%s", response, string(b))
+	}
+
+	var watcher *watch.FakeWatcher
+	for watcher == nil {
+		watcher = simpleStorage.Watcher()
+		time.Sleep(time.Millisecond)
 	}
 
 	// Close response to cause a cancel on the server
@@ -241,7 +264,7 @@ func TestWatchClientClose(t *testing.T) {
 	}
 
 	select {
-	case data, ok := <-simpleStorage.fakeWatch.ResultChan():
+	case data, ok := <-watcher.ResultChan():
 		if ok {
 			t.Errorf("expected a closed result channel, but got watch result %#v", data)
 		}
@@ -257,7 +280,8 @@ func TestWatchRead(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	dest, _ := url.Parse(server.URL)
+	dest, err := url.Parse(server.URL)
+	require.NoError(t, err)
 	dest.Path = "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/simples"
 	dest.RawQuery = "watch=1"
 
@@ -275,7 +299,8 @@ func TestWatchRead(t *testing.T) {
 		}
 
 		if response.StatusCode != http.StatusOK {
-			b, _ := ioutil.ReadAll(response.Body)
+			b, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
 			t.Fatalf("Unexpected response for accept: %q: %#v\n%s", accept, response, string(b))
 		}
 		return response.Body, response.Header.Get("Content-Type")
@@ -340,8 +365,8 @@ func TestWatchRead(t *testing.T) {
 	}
 
 	for _, protocol := range protocols {
-		for _, test := range testCases {
-			func() {
+		for i, test := range testCases {
+			t.Run(fmt.Sprintf("%s-%d", protocol.name, i), func(t *testing.T) {
 				info, ok := runtime.SerializerInfoForMediaType(codecs.SupportedMediaTypes(), test.MediaType)
 				if !ok || info.StreamSerializer == nil {
 					t.Fatal(info)
@@ -361,10 +386,11 @@ func TestWatchRead(t *testing.T) {
 					fr = streamSerializer.Framer.NewFrameReader(r)
 				}
 				d := streaming.NewDecoder(fr, streamSerializer.Serializer)
+				defer d.Close()
 
-				var w *watch.FakeWatcher
-				for w == nil {
-					w = simpleStorage.Watcher()
+				var watcher *watch.FakeWatcher
+				for watcher == nil {
+					watcher = simpleStorage.Watcher()
 					time.Sleep(time.Millisecond)
 				}
 
@@ -373,7 +399,7 @@ func TestWatchRead(t *testing.T) {
 					name := fmt.Sprintf("%s-%s-%d", protocol.name, test.MediaType, i)
 
 					// Send
-					w.Action(action, object)
+					watcher.Action(action, object)
 					// Test receive
 					var got metav1.WatchEvent
 					_, _, err := d.Decode(nil, &got)
@@ -392,14 +418,14 @@ func TestWatchRead(t *testing.T) {
 						t.Errorf("%s: different: %s", name, cmp.Diff(e, a))
 					}
 				}
-				w.Stop()
+				watcher.Stop()
 
 				var got metav1.WatchEvent
 				_, _, err := d.Decode(nil, &got)
 				if err == nil {
 					t.Errorf("Unexpected non-error")
 				}
-			}()
+			})
 		}
 	}
 }
@@ -411,7 +437,8 @@ func TestWatchHTTPAccept(t *testing.T) {
 	defer server.Close()
 	client := http.Client{}
 
-	dest, _ := url.Parse(server.URL)
+	dest, err := url.Parse(server.URL)
+	require.NoError(t, err)
 	dest.Path = "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/watch/simples"
 	dest.RawQuery = ""
 
@@ -431,7 +458,6 @@ func TestWatchHTTPAccept(t *testing.T) {
 		t.Errorf("Unexpected response %#v", response)
 	}
 }
-
 func TestWatchParamParsing(t *testing.T) {
 	simpleStorage := &SimpleRESTStorage{}
 	handler := handle(map[string]rest.Storage{
@@ -441,7 +467,8 @@ func TestWatchParamParsing(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	dest, _ := url.Parse(server.URL)
+	dest, err := url.Parse(server.URL)
+	require.NoError(t, err)
 
 	rootPath := "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/watch/simples"
 	namespacedPath := "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/watch/namespaces/other/simpleroots"
@@ -514,31 +541,32 @@ func TestWatchParamParsing(t *testing.T) {
 		},
 	}
 
-	for _, item := range table {
-		simpleStorage.requestedLabelSelector = labels.Everything()
-		simpleStorage.requestedFieldSelector = fields.Everything()
-		simpleStorage.requestedResourceVersion = "5" // Prove this is set in all cases
-		simpleStorage.requestedResourceNamespace = ""
-		dest.Path = item.path
-		dest.RawQuery = item.rawQuery
-		resp, err := http.Get(dest.String())
-		if err != nil {
-			t.Errorf("%v: unexpected error: %v", item.rawQuery, err)
-			continue
-		}
-		resp.Body.Close()
-		if e, a := item.namespace, simpleStorage.requestedResourceNamespace; e != a {
-			t.Errorf("%v: expected %v, got %v", item.rawQuery, e, a)
-		}
-		if e, a := item.resourceVersion, simpleStorage.requestedResourceVersion; e != a {
-			t.Errorf("%v: expected %v, got %v", item.rawQuery, e, a)
-		}
-		if e, a := item.labelSelector, simpleStorage.requestedLabelSelector.String(); e != a {
-			t.Errorf("%v: expected %v, got %v", item.rawQuery, e, a)
-		}
-		if e, a := item.fieldSelector, simpleStorage.requestedFieldSelector.String(); e != a {
-			t.Errorf("%v: expected %v, got %v", item.rawQuery, e, a)
-		}
+	for i, item := range table {
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			simpleStorage.requestedLabelSelector = labels.Everything()
+			simpleStorage.requestedFieldSelector = fields.Everything()
+			simpleStorage.requestedResourceVersion = "5" // Prove this is set in all cases
+			simpleStorage.requestedResourceNamespace = ""
+			dest.Path = item.path
+			dest.RawQuery = item.rawQuery
+			resp, err := http.Get(dest.String())
+			if err != nil {
+				t.Fatalf("%v: unexpected error: %v", item.rawQuery, err)
+			}
+			resp.Body.Close()
+			if e, a := item.namespace, simpleStorage.requestedResourceNamespace; e != a {
+				t.Errorf("%v: expected %v, got %v", item.rawQuery, e, a)
+			}
+			if e, a := item.resourceVersion, simpleStorage.requestedResourceVersion; e != a {
+				t.Errorf("%v: expected %v, got %v", item.rawQuery, e, a)
+			}
+			if e, a := item.labelSelector, simpleStorage.requestedLabelSelector.String(); e != a {
+				t.Errorf("%v: expected %v, got %v", item.rawQuery, e, a)
+			}
+			if e, a := item.fieldSelector, simpleStorage.requestedFieldSelector.String(); e != a {
+				t.Errorf("%v: expected %v, got %v", item.rawQuery, e, a)
+			}
+		})
 	}
 }
 
@@ -550,7 +578,8 @@ func TestWatchProtocolSelection(t *testing.T) {
 	defer server.CloseClientConnections()
 	client := http.Client{}
 
-	dest, _ := url.Parse(server.URL)
+	dest, err := url.Parse(server.URL)
+	require.NoError(t, err)
 	dest.Path = "/" + prefix + "/" + testGroupVersion.Group + "/" + testGroupVersion.Version + "/watch/simples"
 	dest.RawQuery = ""
 
@@ -633,7 +662,8 @@ func runWatchHTTPBenchmark(b *testing.B, items []runtime.Object, contentType str
 	defer server.Close()
 	client := http.Client{}
 
-	dest, _ := url.Parse(server.URL)
+	dest, err := url.Parse(server.URL)
+	require.NoError(b, err)
 	dest.Path = "/" + prefix + "/" + newGroupVersion.Group + "/" + newGroupVersion.Version + "/watch/simples"
 	dest.RawQuery = ""
 
@@ -661,13 +691,19 @@ func runWatchHTTPBenchmark(b *testing.B, items []runtime.Object, contentType str
 		wg.Done()
 	}()
 
+	var watcher *watch.FakeWatcher
+	for watcher == nil {
+		watcher = simpleStorage.Watcher()
+		time.Sleep(time.Millisecond)
+	}
+
 	actions := []watch.EventType{watch.Added, watch.Modified, watch.Deleted}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		simpleStorage.fakeWatch.Action(actions[i%len(actions)], items[i%len(items)])
+		watcher.Action(actions[i%len(actions)], items[i%len(items)])
 	}
-	simpleStorage.fakeWatch.Stop()
+	watcher.Stop()
 	wg.Wait()
 	b.StopTimer()
 }
@@ -681,7 +717,8 @@ func BenchmarkWatchWebsocket(b *testing.B) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	dest, _ := url.Parse(server.URL)
+	dest, err := url.Parse(server.URL)
+	require.NoError(b, err)
 	dest.Scheme = "ws" // Required by websocket, though the server never sees it.
 	dest.Path = "/" + prefix + "/" + newGroupVersion.Group + "/" + newGroupVersion.Version + "/watch/simples"
 	dest.RawQuery = ""
@@ -701,13 +738,19 @@ func BenchmarkWatchWebsocket(b *testing.B) {
 		wg.Done()
 	}()
 
+	var watcher *watch.FakeWatcher
+	for watcher == nil {
+		watcher = simpleStorage.Watcher()
+		time.Sleep(time.Millisecond)
+	}
+
 	actions := []watch.EventType{watch.Added, watch.Modified, watch.Deleted}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		simpleStorage.fakeWatch.Action(actions[i%len(actions)], &items[i%len(items)])
+		watcher.Action(actions[i%len(actions)], &items[i%len(items)])
 	}
-	simpleStorage.fakeWatch.Stop()
+	watcher.Stop()
 	wg.Wait()
 	b.StopTimer()
 }
