@@ -1011,7 +1011,7 @@ func TestVersionedFeatureGateFlag(t *testing.T) {
 	for i, test := range tests {
 		t.Run(test.arg, func(t *testing.T) {
 			fs := pflag.NewFlagSet("testfeaturegateflag", pflag.ContinueOnError)
-			f := NewVersionedFeatureGate(version.MustParse("1.29"))
+			f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 			if err := f.SetEmulationVersion(version.MustParse("1.28")); err != nil {
 				t.Fatalf("failed to SetEmulationVersion: %v", err)
 			}
@@ -1069,7 +1069,7 @@ func TestVersionedFeatureGateOverride(t *testing.T) {
 	const testBetaGate Feature = "TestBeta"
 
 	// Don't parse the flag, assert defaults are used.
-	f := NewVersionedFeatureGate(version.MustParse("1.29"))
+	f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 
 	err := f.AddVersioned(map[Feature]VersionedSpecs{
 		testAlphaGate: {
@@ -1122,7 +1122,7 @@ func TestVersionedFeatureGateFlagDefaults(t *testing.T) {
 	const testBetaGate Feature = "TestBeta"
 
 	// Don't parse the flag, assert defaults are used.
-	f := NewVersionedFeatureGate(version.MustParse("1.29"))
+	f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 	require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 
 	err := f.AddVersioned(map[Feature]VersionedSpecs{
@@ -1190,7 +1190,7 @@ func TestVersionedFeatureGateKnownFeatures(t *testing.T) {
 	)
 
 	// Don't parse the flag, assert defaults are used.
-	f := NewVersionedFeatureGate(version.MustParse("1.29"))
+	f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 	require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 	err := f.AddVersioned(map[Feature]VersionedSpecs{
 		testGAGate: {
@@ -1252,7 +1252,7 @@ func TestVersionedFeatureGateMetrics(t *testing.T) {
 		kubernetes_feature_enabled{name="TestBetaDisabled",stage="BETA"} 0
 `
 
-	f := NewVersionedFeatureGate(version.MustParse("1.29"))
+	f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 	require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 	err := f.AddVersioned(map[Feature]VersionedSpecs{
 		testAlphaGate: {
@@ -1283,7 +1283,7 @@ func TestVersionedFeatureGateMetrics(t *testing.T) {
 
 func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	t.Run("overrides take effect", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"TestFeature1": {
@@ -1307,7 +1307,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("overrides at specific version take effect", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"TestFeature1": {
@@ -1347,7 +1347,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("overrides are preserved across deep copies", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"TestFeature": {
@@ -1365,7 +1365,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("overrides are not passed over after deep copies", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"TestFeature": {
@@ -1393,7 +1393,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("reflected in known features", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"TestFeature": {
@@ -1420,7 +1420,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("may not change default for specs with locked defaults", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"LockedFeature": {
@@ -1438,7 +1438,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("can change default for specs without locked defaults for emulation version", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"LockedFeature": {
@@ -1455,7 +1455,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("does not supersede explicitly-set value", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"TestFeature": {
@@ -1472,7 +1472,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("prevents re-registration of feature spec after overriding default", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"TestFeature": {
@@ -1493,7 +1493,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("does not allow override for a feature added after emulation version", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.AddVersioned(map[Feature]VersionedSpecs{
 			"TestFeature": {
@@ -1508,7 +1508,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("does not allow override for an unknown feature", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		if err := f.OverrideDefault("TestFeature", true); err == nil {
 			t.Error("expected an error to be returned in attempt to override default for unregistered feature")
@@ -1516,7 +1516,7 @@ func TestVersionedFeatureGateOverrideDefault(t *testing.T) {
 	})
 
 	t.Run("returns error if already added to flag set", func(t *testing.T) {
-		f := NewVersionedFeatureGate(version.MustParse("1.29"))
+		f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 		require.NoError(t, f.SetEmulationVersion(version.MustParse("1.28")))
 		fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
 		f.AddFlag(fs)
@@ -1655,7 +1655,7 @@ func TestExplicitlySet(t *testing.T) {
 	for i, test := range tests {
 		t.Run(test.arg, func(t *testing.T) {
 			fs := pflag.NewFlagSet("testfeaturegateflag", pflag.ContinueOnError)
-			f := NewVersionedFeatureGate(version.MustParse("1.29"))
+			f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 			err := f.AddVersioned(map[Feature]VersionedSpecs{
 				testAlphaGate: {
 					{Version: version.MustParse("1.29"), Default: false, PreRelease: Alpha},
@@ -1694,7 +1694,7 @@ func TestResetFeatureValueToDefault(t *testing.T) {
 	const testAlphaGate Feature = "TestAlpha"
 	const testBetaGate Feature = "TestBeta"
 
-	f := NewVersionedFeatureGate(version.MustParse("1.29"))
+	f := NewVersionedFeatureGate(version.MustParse("1.29"), version.MustParse("1.28"))
 	err := f.AddVersioned(map[Feature]VersionedSpecs{
 		testAlphaGate: {
 			{Version: version.MustParse("1.29"), Default: false, PreRelease: Alpha},
