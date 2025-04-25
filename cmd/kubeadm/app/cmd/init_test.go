@@ -17,7 +17,6 @@ limitations under the License.
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -398,7 +397,7 @@ func TestInitDataClientWithNonDefaultKubeconfig(t *testing.T) {
 		t.Fatalf("data.Client returned unexpected error: %v", err)
 	}
 
-	result := client.Discovery().RESTClient().Verb("HEAD").Do(context.Background())
+	result := client.Discovery().RESTClient().Verb("HEAD").Do(t.Context())
 	if err := result.Error(); err != nil {
 		t.Fatalf("REST client request returned unexpected error: %v", err)
 	}

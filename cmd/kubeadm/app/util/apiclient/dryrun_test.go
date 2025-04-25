@@ -17,7 +17,6 @@ limitations under the License.
 package apiclient
 
 import (
-	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -120,7 +119,7 @@ func TestReactors(t *testing.T) {
 		namespace     string
 		expectedError bool
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	tests := []struct {
 		name         string
 		setup        func(d *DryRun)
