@@ -58,6 +58,9 @@ type DeltaFIFOOptions struct {
 
 	// If set, log output will go to this logger instead of klog.Background().
 	Logger *klog.Logger
+
+	// If set, metrics will be collected for the informer.
+	Metrics *informerMetrics
 }
 
 // DeltaFIFO is like FIFO, but differs in two ways.  One is that the
@@ -143,6 +146,9 @@ type DeltaFIFO struct {
 	// logger is a per-instance logger. This gets chosen when constructing
 	// the instance, with klog.Background() as default.
 	logger klog.Logger
+
+	// metrics tracks basic metric information about the informer.
+	metrics *informerMetrics
 }
 
 // TransformFunc allows for transforming an object before it will be processed.
@@ -261,6 +267,7 @@ func NewDeltaFIFOWithOptions(opts DeltaFIFOOptions) *DeltaFIFO {
 		emitDeltaTypeReplaced: opts.EmitDeltaTypeReplaced,
 		transformer:           opts.Transformer,
 		logger:                klog.Background(),
+		metrics:               opts.Metrics,
 	}
 	if opts.Logger != nil {
 		f.logger = *opts.Logger
@@ -420,6 +427,13 @@ func (f *DeltaFIFO) queueActionLocked(actionType DeltaType, obj interface{}) err
 // ignore emitDeltaTypeReplaced.
 // Caller must lock first.
 func (f *DeltaFIFO) queueActionInternalLocked(actionType, internalActionType DeltaType, obj interface{}) error {
+	defer func() {
+		if f.metrics != nil {
+			f.metrics.numberOfQueuedItem.Set(float64(len(f.queue)))
+			f.metrics.numberOfStoredItem.Set(float64(len(f.items)))
+		}
+	}()
+
 	id, err := f.KeyOf(obj)
 	if err != nil {
 		return KeyError{obj, err}

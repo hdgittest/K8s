@@ -20,11 +20,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/naming"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache/synctrack"
@@ -251,6 +254,10 @@ type ResourceEventHandlerRegistration interface {
 // Optional configuration options for [SharedInformer.AddEventHandlerWithOptions].
 // May be left empty.
 type HandlerOptions struct {
+	// Name is the name of the event handler name for metrics tracking.
+	// If not provided, a hash of the InformerIdentifier and ResourceEventHandler type will be used.
+	Name string
+
 	// Logger overrides the default klog.Background() logger.
 	Logger *klog.Logger
 
@@ -261,6 +268,14 @@ type HandlerOptions struct {
 	//
 	// If nil, the default resync period of the shared informer is used.
 	ResyncPeriod *time.Duration
+}
+
+// InformerIdentifier is the identifier for an informer.
+type InformerIdentifier struct {
+	// Name is the name of the informer. defaults name naming.GetNameFromCallsite(internalPackages...)
+	Name string
+	// Type is the resource type of the informer.
+	Type string
 }
 
 // SharedIndexInformer provides add and get Indexers ability based on SharedInformer.
@@ -303,7 +318,14 @@ func NewSharedIndexInformer(lw ListerWatcher, exampleObject runtime.Object, defa
 func NewSharedIndexInformerWithOptions(lw ListerWatcher, exampleObject runtime.Object, options SharedIndexInformerOptions) SharedIndexInformer {
 	realClock := &clock.RealClock{}
 
+	identifier := InformerIdentifier{
+		Name: makeValidPrometheusLabelValue(naming.GetNameFromCallsite(internalPackages...)),
+		Type: makeValidPrometheusLabelValue(getObjectTypeName(exampleObject)),
+	}
+
 	return &sharedIndexInformer{
+		identifier:                      identifier,
+		metrics:                         newInformerMetrics(identifier),
 		indexer:                         NewIndexer(DeletionHandlingMetaNamespaceKeyFunc, options.Indexers),
 		processor:                       &sharedProcessor{clock: realClock},
 		listerWatcher:                   lw,
@@ -414,6 +436,9 @@ func WaitForCacheSync(stopCh <-chan struct{}, cacheSyncs ...InformerSynced) bool
 // sharedProcessor, which is responsible for relaying those
 // notifications to each of the informer's clients.
 type sharedIndexInformer struct {
+	// identifier is the identifier of the informer.
+	identifier InformerIdentifier
+
 	indexer    Indexer
 	controller Controller
 
@@ -450,6 +475,9 @@ type sharedIndexInformer struct {
 	watchErrorHandler WatchErrorHandlerWithContext
 
 	transform TransformFunc
+
+	// metrics tracks basic metric information about the informer.
+	metrics *informerMetrics
 }
 
 // dummyController hides the fact that a SharedInformer is different from a dedicated one
@@ -548,6 +576,7 @@ func (s *sharedIndexInformer) RunWithContext(ctx context.Context) {
 				KnownObjects:          s.indexer,
 				EmitDeltaTypeReplaced: true,
 				Transformer:           s.transform,
+				Metrics:               s.metrics,
 			})
 		}
 
@@ -693,7 +722,7 @@ func (s *sharedIndexInformer) AddEventHandlerWithOptions(handler ResourceEventHa
 		}
 	}
 
-	listener := newProcessListener(logger, handler, resyncPeriod, determineResyncPeriod(logger, resyncPeriod, s.resyncCheckPeriod), s.clock.Now(), initialBufferSize, s.HasSynced)
+	listener := newProcessListener(logger, s.identifier, options.Name, handler, resyncPeriod, determineResyncPeriod(logger, resyncPeriod, s.resyncCheckPeriod), s.clock.Now(), initialBufferSize, s.HasSynced)
 
 	if !s.started {
 		return s.processor.addListener(listener), nil
@@ -955,6 +984,7 @@ func (p *sharedProcessor) resyncCheckPeriodChanged(logger klog.Logger, resyncChe
 // period of the listener.
 type processorListener struct {
 	logger klog.Logger
+
 	nextCh chan interface{}
 	addCh  chan interface{}
 
@@ -968,6 +998,8 @@ type processorListener struct {
 	// TODO: This is no worse than before, since reflectors were backed by unbounded DeltaFIFOs, but
 	// we should try to do something better.
 	pendingNotifications buffer.RingGrowing
+	// pendingNotificationsCount is the number of pending notifications in the ring buffer.
+	pendingNotificationsCount int64
 
 	// requestedResyncPeriod is how frequently the listener wants a
 	// full resync from the shared informer, but modified by two
@@ -990,6 +1022,9 @@ type processorListener struct {
 	nextResync time.Time
 	// resyncLock guards access to resyncPeriod and nextResync
 	resyncLock sync.Mutex
+
+	// metrics tracks basic metric information about the listener.
+	metrics *eventHandlerMetrics
 }
 
 // HasSynced returns true if the source informer has synced, and all
@@ -998,9 +1033,30 @@ func (p *processorListener) HasSynced() bool {
 	return p.syncTracker.HasSynced()
 }
 
-func newProcessListener(logger klog.Logger, handler ResourceEventHandler, requestedResyncPeriod, resyncPeriod time.Duration, now time.Time, bufferSize int, hasSynced func() bool) *processorListener {
+// generateHandlerName generates a hash from both the identifier and handler type
+// This ensures a unique and stable name for metrics tracking
+func generateHandlerName(identifier InformerIdentifier, handler ResourceEventHandler) string {
+	h := fnv.New32a()
+	handlerType := fmt.Sprintf("%T", handler)
+	combinedInput := identifier.Name + ":" + identifier.Type + ":" + handlerType
+	h.Write([]byte(combinedInput))
+	hashValue := fmt.Sprintf("hash_%x", h.Sum32())
+	return makeValidPrometheusLabelValue(hashValue)
+}
+
+func newProcessListener(logger klog.Logger, identifier InformerIdentifier, handlerName string, handler ResourceEventHandler, requestedResyncPeriod, resyncPeriod time.Duration, now time.Time, bufferSize int, hasSynced func() bool) *processorListener {
+	if handlerName == "" {
+		handlerName = generateHandlerName(identifier, handler)
+	}
+	metrics := &eventHandlerMetrics{
+		numberOfPendingNotifications: sharedInformerMetricsFactory.getMetricsProvider().NewPendingNotificationsMetric(identifier.Name, identifier.Type, handlerName),
+		sizeOfRingGrowing:            sharedInformerMetricsFactory.getMetricsProvider().NewRingGrowingMetric(identifier.Name, identifier.Type, handlerName),
+		processDuration:              sharedInformerMetricsFactory.getMetricsProvider().NewPrcoessDurationMetric(identifier.Name, identifier.Type, handlerName),
+	}
+
 	ret := &processorListener{
 		logger:                logger,
+		metrics:               metrics,
 		nextCh:                make(chan interface{}),
 		addCh:                 make(chan interface{}),
 		handler:               handler,
@@ -1031,6 +1087,7 @@ func (p *processorListener) pop() {
 	for {
 		select {
 		case nextCh <- notification:
+			atomic.AddInt64(&p.pendingNotificationsCount, -1)
 			// Notification dispatched
 			var ok bool
 			notification, ok = p.pendingNotifications.ReadOne()
@@ -1041,6 +1098,7 @@ func (p *processorListener) pop() {
 			if !ok {
 				return
 			}
+			atomic.AddInt64(&p.pendingNotificationsCount, 1)
 			if notification == nil { // No notification to pop (and pendingNotifications is empty)
 				// Optimize the case - skip adding to pendingNotifications
 				notification = notificationToAdd
@@ -1060,11 +1118,21 @@ func (p *processorListener) run() {
 	//
 	// This only applies if utilruntime is configured to not panic, which is not the default.
 	sleepAfterCrash := false
+	metricsUpdateCounter := 0
+	lastMetricsUpdate := time.Now()
+	const (
+		// metricsUpdateInterval is the interval for updating metrics
+		metricsUpdateInterval = 5 * time.Second
+		// metricsUpdateBatch is the batch size for updating metrics
+		metricsUpdateBatch = 100
+	)
+
 	for next := range p.nextCh {
 		if sleepAfterCrash {
 			// Sleep before processing the next item.
 			time.Sleep(time.Second)
 		}
+		startTime := time.Now()
 		func() {
 			// Gets reset below, but only if we get that far.
 			sleepAfterCrash = true
@@ -1084,6 +1152,16 @@ func (p *processorListener) run() {
 				utilruntime.HandleErrorWithLogger(p.logger, nil, "unrecognized notification", "notificationType", fmt.Sprintf("%T", next))
 			}
 			sleepAfterCrash = false
+
+			metricsUpdateCounter++
+			if metricsUpdateCounter >= metricsUpdateBatch || time.Since(lastMetricsUpdate) >= metricsUpdateInterval {
+				p.metrics.processDuration.Observe(time.Since(startTime).Seconds())
+				p.metrics.numberOfPendingNotifications.Set(float64(atomic.LoadInt64(&p.pendingNotificationsCount)))
+				p.metrics.sizeOfRingGrowing.Set(float64(p.pendingNotifications.Cap()))
+
+				metricsUpdateCounter = 0
+				lastMetricsUpdate = time.Now()
+			}
 		}()
 	}
 }
