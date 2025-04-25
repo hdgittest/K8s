@@ -65,9 +65,6 @@ func (requirednessTagValidator) ValidScopes() sets.Set[Scope] {
 }
 
 func (rtv requirednessTagValidator) GetValidations(context Context, _ []string, _ string) (Validations, error) {
-	if context.Type.Kind == types.Alias {
-		panic("alias type should already have been unwrapped")
-	}
 	switch rtv.mode {
 	case requirednessRequired:
 		return rtv.doRequired(context)
@@ -93,7 +90,7 @@ func (rtv requirednessTagValidator) doRequired(context Context) (Validations, er
 	// originally defined as a value-type or a pointer-type in the API.  This
 	// one does.  Since Go doesn't do partial specialization of templates, we
 	// do manual dispatch here.
-	switch context.Type.Kind {
+	switch unaliasType(context.Type).Kind {
 	case types.Slice:
 		return Validations{Functions: []FunctionGen{Function(requiredTagName, ShortCircuit, requiredSliceValidator)}}, nil
 	case types.Map:
@@ -164,7 +161,7 @@ func (rtv requirednessTagValidator) doOptional(context Context) (Validations, er
 	// originally defined as a value-type or a pointer-type in the API.  This
 	// one does.  Since Go doesn't do partial specialization of templates, we
 	// do manual dispatch here.
-	switch context.Type.Kind {
+	switch unaliasType(context.Type).Kind {
 	case types.Slice:
 		return Validations{Functions: []FunctionGen{Function(optionalTagName, ShortCircuit|NonError, optionalSliceValidator)}}, nil
 	case types.Map:
@@ -264,7 +261,7 @@ func (requirednessTagValidator) doForbidden(context Context) (Validations, error
 	// optional check and short-circuit (but without error).  Why?  For
 	// example, this prevents any further validation from trying to run on a
 	// nil pointer.
-	switch context.Type.Kind {
+	switch unaliasType(context.Type).Kind {
 	case types.Slice:
 		return Validations{
 			Functions: []FunctionGen{
