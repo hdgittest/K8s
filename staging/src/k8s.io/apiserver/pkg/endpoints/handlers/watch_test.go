@@ -88,11 +88,13 @@ func TestWatchHTTPErrors(t *testing.T) {
 	defer s.Close()
 
 	// Setup a client
-	dest, _ := url.Parse(s.URL)
+	dest, err := url.Parse(s.URL)
+	require.NoError(t, err)
 	dest.Path = "/" + namedGroupPrefix + "/" + testGroupV2.Group + "/" + testGroupV2.Version + "/simple"
 	dest.RawQuery = "watch=true"
 
-	req, _ := http.NewRequest(http.MethodGet, dest.String(), nil)
+	req, err := http.NewRequest(http.MethodGet, dest.String(), nil)
+	require.NoError(t, err)
 	client := http.Client{}
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -157,11 +159,13 @@ func TestWatchHTTPErrorsBeforeServe(t *testing.T) {
 	defer s.Close()
 
 	// Setup a client
-	dest, _ := url.Parse(s.URL)
+	dest, err := url.Parse(s.URL)
+	require.NoError(t, err)
 	dest.Path = "/" + namedGroupPrefix + "/" + testGroupV2.Group + "/" + testGroupV2.Version + "/simple"
 	dest.RawQuery = "watch=true"
 
-	req, _ := http.NewRequest(http.MethodGet, dest.String(), nil)
+	req, err := http.NewRequest(http.MethodGet, dest.String(), nil)
+	require.NoError(t, err)
 	client := http.Client{}
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -254,11 +258,13 @@ func TestWatchHTTPTimeout(t *testing.T) {
 	defer s.Close()
 
 	// Setup a client
-	dest, _ := url.Parse(s.URL)
+	dest, err := url.Parse(s.URL)
+	require.NoError(t, err)
 	dest.Path = "/" + namedGroupPrefix + "/" + testGroupV2.Group + "/" + testGroupV2.Version + "/simple"
 	dest.RawQuery = "watch=true"
 
-	req, _ := http.NewRequest(http.MethodGet, dest.String(), nil)
+	req, err := http.NewRequest(http.MethodGet, dest.String(), nil)
+	require.NoError(t, err)
 	client := http.Client{}
 	resp, err := client.Do(req)
 	require.NoError(t, err)
