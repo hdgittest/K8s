@@ -1,9 +1,8 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
 approvers:
+  - aojea
   - deads2k
-  - derekwaynecarr
-  - mikedanese
   - sttts
   - wojtek-t
   - jpbetz
@@ -31,6 +30,8 @@ reviewers:
 labels:
   - sig/api-machinery
 emeritus_approvers:
+  - derekwaynecarr
+  - mikedanese
   - nikhiljindal
   - lavalamp
 emeritus_reviewers:
